@@ -1,0 +1,5 @@
+C++ is used a lot in aerospace software. Flight software must be fast and predictable, so engineers care about memory and performance.
+
+A hash table gives fast search by key. In C++ the hash table is std::unordered_map. This search engine uses a hash table to find words quickly.
+
+Космос и программирование связаны: бортовой компьютер управляет полётом, а программа на Земле обрабатывает телеметрию со спутника.
