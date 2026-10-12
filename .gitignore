@@ -3,3 +3,5 @@ build/
 *.o
 .vscode/
 .idea/
+txt_search
+.claude/

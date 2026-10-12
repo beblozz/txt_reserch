@@ -7,11 +7,27 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root">
+        <div class="container">
+            <p class="info">Загрузка...</p>
+        </div>
+    </div>
 
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <noscript>
+        <div class="container error">Для работы страницы нужно включить JavaScript.</div>
+    </noscript>
+
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+    <script>
+        if (!window.React || !window.ReactDOM || !window.Babel) {
+            document.getElementById("root").innerHTML =
+                '<div class="container"><h1>Поиск по текстовым файлам</h1>' +
+                '<p class="error">Не удалось загрузить React с unpkg.com. Проверьте подключение к интернету. ' +
+                'Консольный режим программы работает и без интернета.</p></div>';
+        }
+    </script>
     <script type="text/babel" src="app.js"></script>
 </body>
 </html>

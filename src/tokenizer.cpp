@@ -26,26 +26,41 @@ string toLower(const string& s) {
     return res;
 }
 
-vector<string> splitWords(const string& text) {
-    vector<string> words;
+vector<Token> tokenize(const string& text) {
+    vector<Token> tokens;
     string word;
+    size_t start = 0;
     for (size_t i = 0; i < text.size(); i++) {
         unsigned char c = text[i];
         if (c < 128 && isalnum(c)) {
+            if (word.empty()) {
+                start = i;
+            }
             word += text[i];
         } else if ((c == 0xD0 || c == 0xD1) && i + 1 < text.size()) {
+            if (word.empty()) {
+                start = i;
+            }
             word += text[i];
             word += text[i + 1];
             i++;
         } else {
             if (!word.empty()) {
-                words.push_back(word);
+                tokens.push_back({word, start, word.size()});
                 word = "";
             }
         }
     }
     if (!word.empty()) {
-        words.push_back(word);
+        tokens.push_back({word, start, word.size()});
+    }
+    return tokens;
+}
+
+vector<string> splitWords(const string& text) {
+    vector<string> words;
+    for (const Token& t : tokenize(text)) {
+        words.push_back(t.word);
     }
     return words;
 }

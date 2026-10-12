@@ -1,4 +1,5 @@
 #pragma once
 #include "index.h"
+#include <string>
 
-void runServer(SearchIndex& index, int port);
+bool runServer(SearchIndex& index, int port, const std::string& webDir);

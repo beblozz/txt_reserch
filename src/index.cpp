@@ -38,16 +38,20 @@ bool SearchIndex::build(const string& folderPath) {
 
         Document doc;
         doc.path = fs::relative(entry.path(), folderPath).generic_string();
-        doc.words = splitWords(buffer.str());
+        doc.text = buffer.str();
+        if (doc.text.size() >= 3 && doc.text.compare(0, 3, "\xEF\xBB\xBF") == 0) {
+            doc.text.erase(0, 3);
+        }
+        doc.tokens = tokenize(doc.text);
 
         int docId = docs.size();
-        for (int i = 0; i < (int)doc.words.size(); i++) {
-            string word = toLower(doc.words[i]);
+        for (int i = 0; i < (int)doc.tokens.size(); i++) {
+            string word = toLower(doc.tokens[i].word);
             table[word][docId].push_back(i);
         }
 
-        totalWords += doc.words.size();
-        docs.push_back(doc);
+        totalWords += doc.tokens.size();
+        docs.push_back(move(doc));
     }
 
     auto end = chrono::steady_clock::now();
@@ -55,25 +59,65 @@ bool SearchIndex::build(const string& folderPath) {
     return true;
 }
 
-string SearchIndex::makeSnippet(int docId, int pos, int len) {
-    const vector<string>& words = docs[docId].words;
-    int from = max(0, pos - 6);
-    int to = min((int)words.size(), pos + len + 8);
-
-    string res;
-    if (from > 0) {
-        res += "... ";
+void addPart(vector<SnippetPart>& parts, const string& text, bool mark) {
+    if (text.empty()) {
+        return;
     }
-    for (int i = from; i < to; i++) {
-        res += words[i];
-        if (i + 1 < to) {
-            res += " ";
+    if (!parts.empty() && parts.back().mark == mark) {
+        parts.back().text += text;
+    } else {
+        parts.push_back({text, mark});
+    }
+}
+
+string cleanGap(const string& gap) {
+    string res;
+    for (char c : gap) {
+        if (c == '\n' || c == '\r' || c == '\t' || c == ' ') {
+            if (res.empty() || res.back() != ' ') {
+                res += ' ';
+            }
+        } else {
+            res += c;
         }
     }
-    if (to < (int)words.size()) {
-        res += " ...";
-    }
     return res;
+}
+
+void SearchIndex::makeSnippet(Result& r, int docId, int pos, int len, const vector<string>& q, bool phrase) {
+    const Document& doc = docs[docId];
+    const vector<Token>& tokens = doc.tokens;
+    int from = max(0, pos - 6);
+    int to = min((int)tokens.size(), pos + len + 8);
+
+    vector<SnippetPart> parts;
+    if (from > 0) {
+        addPart(parts, "... ", false);
+    }
+    for (int i = from; i < to; i++) {
+        bool mark;
+        if (phrase) {
+            mark = i >= pos && i < pos + len;
+        } else {
+            mark = find(q.begin(), q.end(), toLower(tokens[i].word)) != q.end();
+        }
+        addPart(parts, tokens[i].word, mark);
+
+        if (i + 1 < to) {
+            size_t gapStart = tokens[i].start + tokens[i].len;
+            string gap = cleanGap(doc.text.substr(gapStart, tokens[i + 1].start - gapStart));
+            addPart(parts, gap, phrase && mark && i + 1 < pos + len);
+        }
+    }
+    if (to < (int)tokens.size()) {
+        addPart(parts, " ...", false);
+    }
+
+    r.snippet = "";
+    for (const SnippetPart& part : parts) {
+        r.snippet += part.text;
+    }
+    r.parts = parts;
 }
 
 vector<Result> SearchIndex::searchWords(const vector<string>& q) {
@@ -100,10 +144,15 @@ vector<Result> SearchIndex::searchWords(const vector<string>& q) {
         }
 
         if (ok) {
+            int firstPos = item.second[0];
+            for (size_t i = 1; i < q.size(); i++) {
+                firstPos = min(firstPos, table[q[i]][docId][0]);
+            }
+
             Result r;
             r.path = docs[docId].path;
             r.count = count;
-            r.snippet = makeSnippet(docId, item.second[0], 1);
+            makeSnippet(r, docId, firstPos, 1, q, false);
             results.push_back(r);
         }
     }
@@ -149,7 +198,7 @@ vector<Result> SearchIndex::searchPhrase(const vector<string>& q) {
             Result r;
             r.path = docs[docId].path;
             r.count = count;
-            r.snippet = makeSnippet(docId, firstPos, q.size());
+            makeSnippet(r, docId, firstPos, q.size(), q, true);
             results.push_back(r);
         }
     }
@@ -187,6 +236,15 @@ vector<Result> SearchIndex::search(const string& query, bool phrase, int top, in
         sort(results.begin(), results.end(), compareResults);
     }
     return results;
+}
+
+const Document* SearchIndex::findDocument(const string& path) {
+    for (const Document& doc : docs) {
+        if (doc.path == path) {
+            return &doc;
+        }
+    }
+    return nullptr;
 }
 
 int SearchIndex::filesCount() {

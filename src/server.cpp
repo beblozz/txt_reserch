@@ -15,6 +15,8 @@ string escapeJson(const string& s) {
             res += "\\\\";
         } else if (c == '\n') {
             res += "\\n";
+        } else if (c == '\r') {
+            continue;
         } else if ((unsigned char)c < 32) {
             res += " ";
         } else {
@@ -35,11 +37,36 @@ string statsJson(SearchIndex& index) {
     return json;
 }
 
-void runServer(SearchIndex& index, int port) {
+string resultJson(const Result& r) {
+    string json = "{";
+    json += "\"path\":\"" + escapeJson(r.path) + "\",";
+    json += "\"count\":" + to_string(r.count) + ",";
+    json += "\"snippet\":\"" + escapeJson(r.snippet) + "\",";
+    json += "\"parts\":[";
+    for (size_t i = 0; i < r.parts.size(); i++) {
+        if (i > 0) {
+            json += ",";
+        }
+        json += "{\"text\":\"" + escapeJson(r.parts[i].text) + "\",";
+        json += string("\"mark\":") + (r.parts[i].mark ? "true" : "false") + "}";
+    }
+    json += "]}";
+    return json;
+}
+
+void sendError(httplib::Response& res, int status, const string& message) {
+    res.status = status;
+    res.set_content("{\"error\":\"" + escapeJson(message) + "\"}", "application/json; charset=utf-8");
+}
+
+bool runServer(SearchIndex& index, int port, const string& webDir) {
     httplib::Server server;
     mutex mtx;
 
-    server.set_mount_point("/", "./web");
+    if (!server.set_mount_point("/", webDir)) {
+        cout << "Cannot find web folder: " << webDir << endl;
+        return false;
+    }
 
     server.Get("/api/stats", [&](const httplib::Request&, httplib::Response& res) {
         lock_guard<mutex> lock(mtx);
@@ -54,6 +81,9 @@ void runServer(SearchIndex& index, int port) {
         int top = 10;
         if (req.has_param("top")) {
             top = atoi(req.get_param_value("top").c_str());
+            if (top < 0) {
+                top = 10;
+            }
         }
 
         auto start = chrono::steady_clock::now();
@@ -70,14 +100,26 @@ void runServer(SearchIndex& index, int port) {
             if (i > 0) {
                 json += ",";
             }
-            json += "{";
-            json += "\"path\":\"" + escapeJson(results[i].path) + "\",";
-            json += "\"count\":" + to_string(results[i].count) + ",";
-            json += "\"snippet\":\"" + escapeJson(results[i].snippet) + "\"";
-            json += "}";
+            json += resultJson(results[i]);
         }
         json += "]}";
 
+        res.set_content(json, "application/json; charset=utf-8");
+    });
+
+    server.Get("/api/file", [&](const httplib::Request& req, httplib::Response& res) {
+        lock_guard<mutex> lock(mtx);
+
+        const Document* doc = index.findDocument(req.get_param_value("path"));
+        if (doc == nullptr) {
+            sendError(res, 404, "file not found");
+            return;
+        }
+        string json = "{";
+        json += "\"path\":\"" + escapeJson(doc->path) + "\",";
+        json += "\"words\":" + to_string(doc->tokens.size()) + ",";
+        json += "\"text\":\"" + escapeJson(doc->text) + "\"";
+        json += "}";
         res.set_content(json, "application/json; charset=utf-8");
     });
 
@@ -87,15 +129,18 @@ void runServer(SearchIndex& index, int port) {
         string path = req.get_param_value("path");
         SearchIndex fresh;
         if (path.empty() || !fresh.build(path)) {
-            res.status = 400;
-            res.set_content("{\"error\":\"folder not found\"}", "application/json; charset=utf-8");
+            sendError(res, 400, "folder not found");
             return;
         }
-        index = fresh;
+        index = move(fresh);
         res.set_content(statsJson(index), "application/json; charset=utf-8");
     });
 
+    if (!server.bind_to_port("127.0.0.1", port)) {
+        cout << "Cannot start server on port " << port << " (maybe it is busy?)" << endl;
+        return false;
+    }
     cout << "Server started: http://localhost:" << port << endl;
     cout << "Press Ctrl+C to stop" << endl;
-    server.listen("localhost", port);
+    return server.listen_after_bind();
 }
